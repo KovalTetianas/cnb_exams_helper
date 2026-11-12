@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Поиск ответов ČNB</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔎</text></svg>">
+<style>
+:root{
+  --bg:#EDF1F5; --surface:#FFFFFF; --ink:#16202A; --muted:#5A6877; --line:#D3DBE3;
+  --accent:#1D4E89; --accent-ink:#FFFFFF; --accent-soft:#E2EBF6;
+  --ok:#1E7549; --ok-soft:#DFF2E7; --warn:#8A5A00; --warn-soft:#FFF3D6;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0F151C; --surface:#18212B; --ink:#E5ECF2; --muted:#94A3B1; --line:#2B3744;
+    --accent:#7DAEEB; --accent-ink:#0F151C; --accent-soft:#1D2D40;
+    --ok:#5BC68C; --ok-soft:#173326; --warn:#F0C060; --warn-soft:#3A2F14;
+  }
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.5}
+button{font:inherit;color:inherit;cursor:pointer}
+.wrap{max-width:860px;margin:0 auto;padding:20px 16px 64px}
+h1{font-size:1.7rem;line-height:1.2;margin:.2em 0 .4em}
+.muted{color:var(--muted)} .small{font-size:.875rem}
+.exams{display:grid;gap:12px;margin-top:16px}
+.exam{display:block;text-align:left;width:100%;background:var(--surface);border:1px solid var(--line);border-left:6px solid var(--accent);border-radius:6px;padding:16px 18px}
+.exam:hover{border-color:var(--accent)}
+.exam b{display:block;font-size:1.15rem}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.back{background:none;border:0;color:var(--muted);font-weight:600;padding:6px 8px;border-radius:6px}
+.back:hover{background:var(--surface);color:var(--ink)}
+.top h1{font-size:1.25rem;margin:0;flex:1;min-width:0}
+.drop{position:relative;background:var(--surface);border:2px dashed var(--line);border-radius:10px;padding:10px}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop textarea{width:100%;min-height:110px;resize:vertical;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;padding:6px}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:4px 6px 2px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:6px 12px;font-size:.9rem}
+.btn:hover{border-color:var(--accent)}
+.thumb{max-height:64px;max-width:120px;border-radius:4px;border:1px solid var(--line)}
+.status{font-size:.9rem;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px;margin-top:16px}
+.qtext{font-size:1.1rem;font-weight:600;margin:0 0 12px;white-space:pre-wrap}
+.opts{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.opts li{border:1px solid var(--line);border-radius:6px;padding:10px 12px;display:flex;gap:10px}
+.opts li.ok{background:var(--ok-soft);border-color:var(--ok);font-weight:600}
+.opts .mk{flex:none;width:1.4em;text-align:center;font-weight:700;color:var(--muted)}
+.opts li.ok .mk{color:var(--ok)}
+.tag{display:inline-block;font-size:.8rem;padding:1px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent);margin-right:6px}
+.tag.warn{background:var(--warn-soft);color:var(--warn)}
+.meta{margin-bottom:10px}
+details{margin-top:12px} summary{cursor:pointer;color:var(--accent);font-weight:600}
+details .body{white-space:pre-wrap;margin-top:6px;font-size:.95rem}
+.alts{margin-top:18px}
+.alts h2{font-size:1rem;margin:0 0 8px}
+.alt{display:flex;gap:10px;width:100%;text-align:left;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:8px 12px;margin-bottom:6px;font-size:.92rem}
+.alt:hover,.alt.cur{border-color:var(--accent)}
+.alt .sc{flex:none;color:var(--muted);font-variant-numeric:tabular-nums;width:3.2em}
+.empty{margin-top:24px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script src="matcher.js"></script>
+<script>
+'use strict';
+var EXAMS = [
+  {key:'poj', title:'Životní pojištění a pojištění velkých pojistných rizik'},
+  {key:'pen', title:'Penze'},
+  {key:'inv', title:'Investiční zprostředkovatel'},
+  {key:'uve', title:'Úvěry – souhrnná zkouška'}
+];
+// Tesseract.js 5.1.1 is vendored in ./vendor so the app works without external CDNs
+var BASE = location.href.replace(/[#?].*$/,'').replace(/[^/]*$/,'');
+var TESS_URL = 'vendor/tesseract.min.js';
+var app = document.getElementById('app');
+var state = {exam:null, index:null, results:[], cur:0, ocrJob:0};
+
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function loadScript(src){return new Promise(function(res,rej){var s=document.createElement('script');s.src=src;s.onload=res;s.onerror=function(){rej(new Error('Не удалось загрузить '+src))};document.head.appendChild(s)})}
+function loadExam(k){
+  window.CNB_DATA = window.CNB_DATA || {};
+  if (window.CNB_DATA[k]) return Promise.resolve(window.CNB_DATA[k]);
+  return loadScript('data/'+k+'.js').then(function(){return window.CNB_DATA[k]});
+}
+
+/* ---------- OCR ---------- */
+var workerP = null;
+function getWorker(){
+  if (!workerP) workerP = (window.Tesseract ? Promise.resolve() : loadScript(TESS_URL))
+    .then(function(){ return Tesseract.createWorker('ces', 1, {workerPath:BASE+'vendor/worker.min.js', corePath:BASE+'vendor/core', langPath:BASE+'vendor/lang', logger:function(m){ if(m.status==='recognizing text') setStatus('Распознаю текст… '+Math.round(m.progress*100)+'%'); }}); })
+    .catch(function(e){ workerP = null; throw e; });
+  return workerP;
+}
+// upscale small screenshots — Tesseract works much better on ~2x text
+function prepImage(blob){
+  return new Promise(function(res){
+    var url = URL.createObjectURL(blob), img = new Image();
+    img.onload = function(){
+      var scale = img.width < 1600 ? 2 : 1;
+      var c = document.createElement('canvas'); c.width = img.width*scale; c.height = img.height*scale;
+      var g = c.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(img,0,0,c.width,c.height);
+      URL.revokeObjectURL(url); res(c);
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); res(blob); };
+    img.src = url;
+  });
+}
+function handleImage(blob){
+  var job = ++state.ocrJob;
+  var th = document.getElementById('thumb');
+  th.src = URL.createObjectURL(blob); th.hidden = false;
+  setStatus('Загружаю распознавание (первый раз ~10–20 сек)…');
+  Promise.all([getWorker(), prepImage(blob)]).then(function(r){
+    setStatus('Распознаю текст…');
+    return r[0].recognize(r[1]);
+  }).then(function(out){
+    if (job !== state.ocrJob) return;
+    var text = out.data.text.trim();
+    document.getElementById('inp').value = text;
+    setStatus(text ? 'Текст распознан — можно поправить его в поле' : 'Текст на картинке не найден');
+    runSearch(text);
+  }).catch(function(e){
+    if (job !== state.ocrJob) return;
+    setStatus('Ошибка распознавания: '+e.message);
+  });
+}
+function setStatus(t){ var s=document.getElementById('status'); if(s) s.textContent=t; }
+
+/* ---------- screens ---------- */
+function home(){
+  state.exam = null;
+  app.innerHTML = '<h1>Поиск ответов к экзаменам ČNB</h1>'+
+    '<p class="muted">Выберите экзамен, к которому готовитесь.</p><div class="exams">'+
+    EXAMS.map(function(e){return '<button class="exam" data-k="'+e.key+'"><b>'+esc(e.title)+'</b></button>'}).join('')+'</div>';
+  app.querySelectorAll('.exam').forEach(function(b){ b.onclick=function(){ location.hash = b.dataset.k; }; });
+}
+
+function examScreen(k){
+  var meta = EXAMS.filter(function(e){return e.key===k})[0];
+  if (!meta) { location.hash=''; return; }
+  app.innerHTML = '<div class="top"><button class="back" id="back">← Экзамены</button><h1>'+esc(meta.title)+'</h1></div>'+
+    '<div class="drop" id="drop">'+
+      '<textarea id="inp" placeholder="Вставьте скриншот вопроса (Ctrl+V) или начните печатать текст вопроса…" autofocus></textarea>'+
+      '<div class="bar"><img id="thumb" class="thumb" hidden alt="">'+
+      '<label class="btn">📷 Фото<input type="file" id="file" accept="image/*" hidden></label>'+
+      '<button class="btn" id="clear">Очистить</button><span class="status" id="status">Загружаю вопросы…</span></div>'+
+    '</div><div id="out"></div>';
+  document.getElementById('back').onclick = function(){ location.hash=''; };
+  var inp = document.getElementById('inp'), drop = document.getElementById('drop'), t;
+  inp.addEventListener('input', function(){ clearTimeout(t); t=setTimeout(function(){ runSearch(inp.value); },250); });
+  document.getElementById('clear').onclick = function(){ state.ocrJob++; inp.value=''; document.getElementById('thumb').hidden=true; setStatus(''); runSearch(''); inp.focus(); };
+  document.getElementById('file').onchange = function(e){ var f=e.target.files[0]; if(f) handleImage(f); e.target.value=''; };
+  drop.addEventListener('dragover', function(e){ e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', function(){ drop.classList.remove('over'); });
+  drop.addEventListener('drop', function(e){ e.preventDefault(); drop.classList.remove('over');
+    var f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f && /^image\//.test(f.type)) handleImage(f); });
+
+  state.index = null;
+  loadExam(k).then(function(ex){
+    if (state.exam !== k) return;
+    state.index = new Matcher.Index(ex);
+    setStatus(ex.questions.length+' вопросов в базе');
+    if (inp.value.trim()) runSearch(inp.value);
+    getWorker().catch(function(){}); // warm up OCR in background
+  }).catch(function(e){ setStatus(e.message); });
+  state.exam = k;
+  runSearch('');
+}
+
+// global paste: works even if the textarea is not focused
+document.addEventListener('paste', function(e){
+  if (!state.exam) return;
+  var items = (e.clipboardData && e.clipboardData.items) || [];
+  for (var i=0;i<items.length;i++){
+    if (items[i].type.indexOf('image/')===0){
+      e.preventDefault(); handleImage(items[i].getAsFile()); return;
+    }
+  }
+  var inp = document.getElementById('inp');
+  if (document.activeElement !== inp){
+    var txt = e.clipboardData.getData('text');
+    if (txt){ e.preventDefault(); inp.value = txt; runSearch(txt); }
+  }
+});
+
+function runSearch(text){
+  var out = document.getElementById('out'); if (!out) return;
+  if (!text || !text.trim()){ state.results=[]; out.innerHTML = '<p class="empty">Здесь появится найденный вопрос с отмеченными правильными ответами.</p>'; return; }
+  if (!state.index){ out.innerHTML = '<p class="empty">Загружаю базу вопросов…</p>'; return; }
+  state.results = state.index.search(text, 6);
+  state.cur = 0;
+  render();
+}
+
+function render(){
+  var out = document.getElementById('out'), ex = state.index.exam, r = state.results;
+  if (!r.length){ out.innerHTML = '<p class="empty">Ничего похожего не найдено.</p>'; return; }
+  var hit = r[state.cur], q = ex.questions[hit.i], pct = Math.round(hit.score*100);
+  var type = q.c.length>1 ? '<span class="tag">несколько правильных ('+q.c.length+')</span>' : '<span class="tag">один правильный</span>';
+  var conf = pct < 45 ? '<span class="tag warn">совпадение '+pct+'% — проверьте</span>' : '<span class="tag">совпадение '+pct+'%</span>';
+  var html = '<div class="card"><div class="meta">'+conf+type+'<span class="muted small">ID '+esc(q.id)+'</span></div>'+
+    '<p class="qtext">'+esc(q.q)+'</p><ol class="opts">'+
+    q.o.map(function(o,i){ var ok=q.c.indexOf(i)>=0; return '<li class="'+(ok?'ok':'')+'"><span class="mk">'+(ok?'✓':String.fromCharCode(97+i))+'</span><span>'+esc(o)+'</span></li>'; }).join('')+
+    '</ol>';
+  if (q.k!=null && ex.cases && ex.cases[q.k]) html += '<details><summary>Текст модельной ситуации</summary><div class="body">'+esc(ex.cases[q.k].text)+'</div></details>';
+  if (q.e) html += '<details><summary>Пояснение</summary><div class="body">'+esc(q.e)+'</div></details>';
+  html += '</div>';
+  if (r.length>1){
+    html += '<div class="alts"><h2>Другие похожие вопросы</h2>'+r.map(function(x,j){
+      var qq = ex.questions[x.i];
+      return '<button class="alt'+(j===state.cur?' cur':'')+'" data-j="'+j+'"><span class="sc">'+Math.round(x.score*100)+'%</span><span>'+esc(qq.q.length>160?qq.q.slice(0,160)+'…':qq.q)+'</span></button>';
+    }).join('')+'</div>';
+  }
+  out.innerHTML = html;
+  out.querySelectorAll('.alt').forEach(function(b){ b.onclick=function(){ state.cur=+b.dataset.j; render(); window.scrollTo({top:document.getElementById('out').offsetTop-10,behavior:'smooth'}); }; });
+}
+
+function route(){
+  var k = location.hash.slice(1);
+  if (k) examScreen(k); else home();
+}
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
